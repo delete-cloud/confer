@@ -18,8 +18,9 @@ The supported products can act as external room participants and as MCP hosts:
 | `grok` | Grok Build | `grok` | native `grok mcp` command |
 | `agy` | Antigravity CLI | `agy` | native `agy mcp` command |
 | `copilot` | GitHub Copilot CLI | `copilot` | native `copilot mcp` command |
+| `kimi` | Kimi Code | `kimi` | `$KIMI_CODE_HOME/mcp.json` (default `~/.kimi-code/mcp.json`) |
 
-MCP is the public protocol. Every seat uses an ACP v1 lifecycle internally. Cursor, Grok, and Copilot use native ACP over stdio; Codex uses an in-process ACP bridge to its app-server; Claude and Antigravity use in-process ACP bridges to their native headless commands. Confer ships one Rust binary and requires no separate bridge runtime.
+MCP is the public protocol. Every seat uses an ACP v1 lifecycle internally. Cursor, Grok, and Copilot use native ACP over stdio; Codex uses an in-process ACP bridge to its app-server; Claude, Antigravity, and Kimi Code use in-process ACP bridges to their native headless commands. Confer ships one Rust binary and requires no separate bridge runtime.
 
 ## Room model
 
@@ -164,13 +165,13 @@ confer skill install [--scope user|project] [--agent <id>]... [--dry-run] [--yes
 
 `confer mcp` serves stdio MCP. Room operations are not exposed as ordinary CLI commands.
 
-MCP and Skill installation are deliberately independent. `confer mcp install` never installs the Skill, and `confer skill install` never changes MCP configuration. Both installation commands support Claude Code, Codex, Cursor, Grok, Antigravity CLI, and GitHub Copilot CLI.
+MCP and Skill installation are deliberately independent. `confer mcp install` never installs the Skill, and `confer skill install` never changes MCP configuration. Both installation commands support Claude Code, Codex, Cursor, Grok, Antigravity CLI, GitHub Copilot CLI, and Kimi Code.
 
-`confer skill install` embeds the [canonical Skill](../skills/confer/SKILL.md) and delegates target paths, conflict protection, updates, scope, and dry-run reporting to Kitup. User scope is the default.
+`confer skill install` embeds the [canonical Skill](../skills/confer/SKILL.md) and delegates target paths, conflict protection, updates, scope, and dry-run reporting to Kitup. User scope is the default. Kitup 0.1.4's `kimi-cli` host data prefers `~/.config/agents/skills`, which Kimi Code does not scan (its user skill roots are `$KIMI_CODE_HOME/skills` and `~/.agents/skills`), so a user-scope install targeting Kimi may land in a directory Kimi Code never reads until Kitup corrects that host data.
 
 `confer mcp install` follows each host’s supported registration mechanism. Repeated installation updates the Confer-owned registration without deleting unrelated MCP entries. Uninstall removes only the `confer` entry.
 
-Explicit `--agent cursor` registration and removal edit Cursor's MCP configuration without requiring the participant CLI on `PATH`. Default selection and `--agent '*'` still discover installed host executables; they do not create Cursor configuration on machines without its CLI. Other hosts require their native registration command. Registration does not establish participant readiness or authentication.
+Explicit `--agent cursor` and `--agent kimi` registration and removal edit that host's MCP configuration (Cursor's `~/.cursor/mcp.json`, Kimi Code's `$KIMI_CODE_HOME/mcp.json`, default `~/.kimi-code/mcp.json`) without requiring the participant CLI on `PATH`. Default selection and `--agent '*'` still discover installed host executables; they do not create MCP configuration on machines without its CLI. Other hosts require their native registration command. Registration does not establish participant readiness or authentication.
 
 ## Adapter contract
 
@@ -195,7 +196,7 @@ Model and reasoning fields are requests to the native CLI. An unsupported value 
 
 Confer uses the room workspace as each child process working directory. It does not create filesystem isolation. Independent seats may therefore read or modify the same files even when their messages are isolated.
 
-Confer launches every seat with that agent's full-permission setting so a non-interactive process is never blocked on an approval prompt it cannot answer: Claude and Antigravity receive `--dangerously-skip-permissions`; Codex receives app-server `approvalPolicy: never` and the full-access sandbox policy; Cursor receives `--trust --force`; Grok receives `--always-approve` and ACP `yoloMode`; and Copilot receives `--allow-all`. Seats therefore run with the authority of the local Confer process and without sandbox isolation. Explicit task instructions remain the only limit on what a seat is asked to do.
+Confer launches every seat with that agent's full-permission setting so a non-interactive process is never blocked on an approval prompt it cannot answer: Claude and Antigravity receive `--dangerously-skip-permissions`; Codex receives app-server `approvalPolicy: never` and the full-access sandbox policy; Cursor receives `--trust --force`; Grok receives `--always-approve` and ACP `yoloMode`; Copilot receives `--allow-all`; and Kimi Code's non-interactive `-p` mode runs under its default `auto` permission policy, which never asks for approval but still enforces the user's static deny rules. Seats therefore run with the authority of the local Confer process and without sandbox isolation, except that a Kimi Code seat remains subject to its configured deny rules. Explicit task instructions remain the only limit on what a seat is asked to do.
 
 ## Errors
 

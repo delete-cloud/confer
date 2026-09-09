@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
@@ -82,7 +82,9 @@ pub(crate) fn check_readiness(agent: AgentKind) -> Readiness {
 pub(crate) fn reserve_session(agent: AgentKind) -> Option<String> {
     match agent {
         AgentKind::Claude | AgentKind::Grok => Some(uuid::Uuid::new_v4().to_string()),
-        AgentKind::Codex | AgentKind::Cursor | AgentKind::Agy | AgentKind::Copilot => None,
+        AgentKind::Codex | AgentKind::Cursor | AgentKind::Agy | AgentKind::Copilot | AgentKind::Kimi => {
+            None
+        }
     }
 }
 
@@ -270,6 +272,16 @@ async fn run_cli(invocation: Invocation, prompt: &str) -> AdapterOutput {
             error: Some(error_text(&error, &stderr, "")),
         };
     }
+    if invocation.agent == AgentKind::Kimi && observed_session_id.is_none() {
+        // Kimi Code always emits a session.resume_hint with its session id;
+        // a "successful" run without one means we never actually attached to
+        // a session, so report it instead of returning an unresumable answer.
+        return AdapterOutput {
+            observed_session_id: None,
+            answer: None,
+            error: Some(error_text("kimi did not report a session id", &stderr, &raw)),
+        };
+    }
     let answer = answer
         .or_else(|| (!streamed_text.is_empty()).then_some(streamed_text))
         .or_else(|| {
@@ -326,6 +338,9 @@ pub(crate) fn validate_seat_config(
     effort: Option<&str>,
 ) -> Result<()> {
     validate_effort(effort)?;
+    if agent == AgentKind::Kimi && effort.is_some() {
+        bail!("Kimi Code does not support reasoning_effort");
+    }
     if agent == AgentKind::Agy
         && let Some(effort) = effort
         && !["low", "medium", "high"].contains(&effort)
@@ -429,6 +444,27 @@ fn build_command(invocation: &Invocation, prompt: &str) -> Result<Command> {
                 command.args(["--effort", effort]);
             }
         }
+        AgentKind::Kimi => {
+            // `-p` runs one prompt non-interactively under Kimi Code's
+            // default `auto` permission policy, which never blocks on an
+            // approval prompt.
+            //
+            // Pin KIMI_CODE_HOME to the resolved data root so the child
+            // agrees with confer's readiness and MCP registration even
+            // when the variable is unset or relative in our environment.
+            let kimi_home =
+                resolve_kimi_home(std::env::var_os("KIMI_CODE_HOME"), dirs::home_dir())?;
+            command.env("KIMI_CODE_HOME", &kimi_home);
+            command.args(["-p", prompt, "--output-format", "stream-json"]);
+            if let Some(id) = &invocation.native_session_id {
+                command.args(["-S", id]);
+            } else if !invocation.first_message {
+                bail!("Kimi Code resume requires a native session ID");
+            }
+            if let Some(model) = &invocation.model {
+                command.args(["-m", model]);
+            }
+        }
         AgentKind::Codex | AgentKind::Grok | AgentKind::Cursor | AgentKind::Copilot => {
             bail!("agent requires its ACP transport")
         }
@@ -482,12 +518,15 @@ fn executable_file(path: &Path) -> bool {
 }
 
 fn has_local_auth_marker(agent: AgentKind) -> bool {
+    // Kimi Code reads credentials only from its data root (OAuth files and
+    // provider `api_key` entries in config.toml); it does not consume
+    // KIMI_API_KEY/MOONSHOT_API_KEY from the shell environment.
     let env_ready = match agent {
         AgentKind::Claude => std::env::var_os("ANTHROPIC_API_KEY").is_some(),
         AgentKind::Codex => std::env::var_os("OPENAI_API_KEY").is_some(),
         AgentKind::Cursor => std::env::var_os("CURSOR_API_KEY").is_some(),
         AgentKind::Grok => std::env::var_os("XAI_API_KEY").is_some(),
-        AgentKind::Agy => false,
+        AgentKind::Agy | AgentKind::Kimi => false,
         AgentKind::Copilot => [
             "COPILOT_GITHUB_TOKEN",
             "GH_TOKEN",
@@ -526,8 +565,44 @@ fn has_local_auth_marker(agent: AgentKind) -> bool {
         // Copilot keeps its login token in the OS credential store, so the
         // managed config file written on first launch is the local marker.
         AgentKind::Copilot => vec![copilot_home(&home).join("config.json")],
+        AgentKind::Kimi => {
+            let Ok(kimi_home) = resolve_kimi_home(std::env::var_os("KIMI_CODE_HOME"), Some(home))
+            else {
+                return false;
+            };
+            return kimi_home_has_auth(&kimi_home);
+        }
     };
     markers.iter().any(|marker| marker.is_file())
+}
+
+fn kimi_home_has_auth(kimi_home: &Path) -> bool {
+    // OAuth tokens live in credentials/<profile>.json; API-key auth appears
+    // as a non-empty `api_key` entry in config.toml. Kimi Code writes
+    // config.toml (with empty api_key values) on first launch, before any
+    // login, so file existence alone is not an auth marker. Files under
+    // credentials/mcp/ are MCP server metadata, not credentials.
+    let credentials = kimi_home.join("credentials");
+    if let Ok(entries) = std::fs::read_dir(&credentials) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+                return true;
+            }
+        }
+    }
+    let Ok(config) = std::fs::read_to_string(kimi_home.join("config.toml")) else {
+        return false;
+    };
+    config.lines().any(|line| {
+        let Some((key, value)) = line.trim().split_once('=') else {
+            return false;
+        };
+        if key.trim() != "api_key" {
+            return false;
+        }
+        !value.trim().trim_matches('"').trim().is_empty()
+    })
 }
 
 fn copilot_home(home: &Path) -> PathBuf {
@@ -535,6 +610,30 @@ fn copilot_home(home: &Path) -> PathBuf {
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".copilot"))
+}
+
+pub(crate) fn resolve_kimi_home(
+    kimi_code_home: Option<std::ffi::OsString>,
+    home: Option<PathBuf>,
+) -> Result<PathBuf> {
+    match kimi_code_home.filter(|value| !value.is_empty()) {
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            if dir.is_absolute() {
+                Ok(dir)
+            } else {
+                // Kimi Code resolves a relative KIMI_CODE_HOME against the
+                // child's working directory; anchor it to confer's cwd so
+                // both sides mean the same data root.
+                let cwd =
+                    std::env::current_dir().context("cannot determine current directory")?;
+                Ok(cwd.join(dir))
+            }
+        }
+        None => home
+            .map(|home| home.join(".kimi-code"))
+            .context("cannot determine home directory"),
+    }
 }
 
 fn extract_session_id(value: &Value) -> Option<String> {
@@ -921,5 +1020,138 @@ mod tests {
             first_message: true,
         };
         assert!(build_command(&invalid_effort, &super::prompt_text(&invalid_effort)).is_err());
+    }
+
+    #[test]
+    fn builds_kimi_command_for_first_and_resume_messages() {
+        let first = Invocation {
+            agent: AgentKind::Kimi,
+            executable: PathBuf::from("kimi"),
+            workspace: PathBuf::from("/workspace"),
+            native_session_id: None,
+            model: Some("kimi-code/k3".into()),
+            reasoning_effort: None,
+            instructions: None,
+            message: "Analyze this".into(),
+            first_message: true,
+        };
+        let command = build_command(&first, &super::prompt_text(&first)).unwrap();
+        let debug = format!("{command:?}");
+        assert!(debug.contains("-p"));
+        assert!(debug.contains("--output-format"));
+        assert!(debug.contains("stream-json"));
+        assert!(debug.contains("-m"));
+        assert!(debug.contains("kimi-code/k3"));
+        // KIMI_CODE_HOME is pinned so the child resolves the same data root.
+        assert!(debug.contains("KIMI_CODE_HOME"));
+
+        let resume = Invocation {
+            agent: AgentKind::Kimi,
+            executable: PathBuf::from("kimi"),
+            workspace: PathBuf::from("/workspace"),
+            native_session_id: Some("session_kimi-1".into()),
+            model: None,
+            reasoning_effort: None,
+            instructions: None,
+            message: "Next step".into(),
+            first_message: false,
+        };
+        let command = build_command(&resume, &super::prompt_text(&resume)).unwrap();
+        let debug = format!("{command:?}");
+        assert!(debug.contains("-S"));
+        assert!(debug.contains("session_kimi-1"));
+
+        let invalid_resume = Invocation {
+            agent: AgentKind::Kimi,
+            executable: PathBuf::from("kimi"),
+            workspace: PathBuf::from("/workspace"),
+            native_session_id: None,
+            model: None,
+            reasoning_effort: None,
+            instructions: None,
+            message: "Next step".into(),
+            first_message: false,
+        };
+        assert!(build_command(&invalid_resume, &super::prompt_text(&invalid_resume)).is_err());
+    }
+
+    #[test]
+    fn kimi_rejects_reasoning_effort() {
+        assert!(super::validate_seat_config(AgentKind::Kimi, None, Some("high")).is_err());
+        assert!(super::validate_seat_config(AgentKind::Kimi, None, None).is_ok());
+    }
+
+
+    #[test]
+    fn kimi_home_respects_env_override_and_default() {
+        use std::ffi::OsString;
+        let home = PathBuf::from("/home/test");
+        assert_eq!(
+            super::resolve_kimi_home(Some(OsString::from("/custom/kimi")), Some(home.clone()))
+                .unwrap(),
+            PathBuf::from("/custom/kimi")
+        );
+        assert_eq!(
+            super::resolve_kimi_home(None, Some(home.clone())).unwrap(),
+            home.join(".kimi-code")
+        );
+        assert_eq!(
+            super::resolve_kimi_home(Some(OsString::new()), Some(home.clone())).unwrap(),
+            home.join(".kimi-code")
+        );
+        assert!(super::resolve_kimi_home(None, None).is_err());
+        // Relative paths anchor to the current directory so confer and the
+        // kimi child process resolve the same data root.
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(
+            super::resolve_kimi_home(Some(OsString::from("relative/kimi")), Some(home.clone()))
+                .unwrap(),
+            cwd.join("relative/kimi")
+        );
+    }
+
+    #[test]
+    fn parses_kimi_stream_json_events() {
+        let version = serde_json::json!({"role":"meta","type":"system.version","version":"0.41.0"});
+        let answer = serde_json::json!({"role":"assistant","content":"KIMI_OK"});
+        let resume_hint = serde_json::json!({
+            "role": "meta",
+            "type": "session.resume_hint",
+            "session_id": "session_kimi-1",
+        });
+        assert_eq!(extract_session_id(&version), None);
+        assert_eq!(extract_answer(&answer).as_deref(), Some("KIMI_OK"));
+        assert_eq!(
+            extract_session_id(&resume_hint).as_deref(),
+            Some("session_kimi-1")
+        );
+    }
+
+    #[test]
+    fn kimi_auth_marker_requires_credentials_or_a_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        assert!(!super::kimi_home_has_auth(home));
+        // First-launch config.toml carries empty api_key values; not auth.
+        std::fs::write(
+            home.join("config.toml"),
+            "[providers.\"managed:kimi-code\"]\napi_key = \"\"\n",
+        )
+        .unwrap();
+        assert!(!super::kimi_home_has_auth(home));
+        // A non-empty api_key entry counts.
+        std::fs::write(
+            home.join("config.toml"),
+            "[providers.custom]\ntype = \"openai\"\napi_key = \"sk-test\"\n",
+        )
+        .unwrap();
+        assert!(super::kimi_home_has_auth(home));
+        // OAuth credential files count; MCP metadata under credentials/mcp/ does not.
+        std::fs::remove_file(home.join("config.toml")).unwrap();
+        std::fs::create_dir_all(home.join("credentials/mcp")).unwrap();
+        std::fs::write(home.join("credentials/mcp/tool.json"), "{}").unwrap();
+        assert!(!super::kimi_home_has_auth(home));
+        std::fs::write(home.join("credentials/kimi-code.json"), "{}").unwrap();
+        assert!(super::kimi_home_has_auth(home));
     }
 }
