@@ -1080,7 +1080,7 @@ dependencies = [
 [[package]]
 name = "kitup"
 version = "0.1.4"
-source = "git+https://github.com/delete-cloud/kitup.git?rev=716a74480300582b7044e2ae745cc42974cf001f#716a74480300582b7044e2ae745cc42974cf001f"
+source = "git+https://github.com/lathe-cli/kitup.git?branch=main#3cdf8974e49d8b15ce6709779778dd5da73cc4d4"
 dependencies = [
  "serde",
  "serde_json",

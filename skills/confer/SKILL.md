@@ -23,6 +23,8 @@ Choose the number of execution seats from the task; there is no default count. S
 
 When the host is Kimi Code, pass `"host_agent": "kimi"` on create_room: confer's automatic host detection recognizes Claude, Codex, Cursor, Grok, and Copilot session markers, while Kimi Code and Antigravity expose no equivalent marker, so auto-detection would mislabel those hosts. Pass it explicitly whenever auto-detection may not identify the host, not only for Kimi.
 
+Kimi Code seats' `reasoning_effort` is thinking (`on` / `low` / `high` / `max`).
+
 ## Keep Seats Private
 
 For independent work, send the same prompt separately or by multicast and wait for every required answer before sharing any of them.
