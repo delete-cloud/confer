@@ -170,11 +170,17 @@ pub(super) async fn run_connection(
                 // ACP advertises yolo as "Auto-approve everything", but
                 // Kimi 0.41.0 maps auto→engine permission "auto" (Never
                 // Ask) and yolo→"yolo" (Ask When Needed). Unattended seats
-                // need Never Ask. Model uses the same picker; thinking has
-                // no effort levels.
+                // need Never Ask. Model uses the same picker. Confer's
+                // reasoning_effort maps to thinking (`on`/`low`/`high`/`max`);
+                // `none`/`off` are rejected at seat config. A level the
+                // current picker does not list fails here, before the prompt.
                 let mode = Some(("mode", "auto"));
                 let model = invocation.model.as_deref().map(|model| ("model", model));
-                for (id, value) in mode.into_iter().chain(model) {
+                let thinking = invocation
+                    .reasoning_effort
+                    .as_deref()
+                    .map(|effort| ("thinking", effort));
+                for (id, value) in mode.into_iter().chain(model).chain(thinking) {
                     cx.send_request(SetSessionConfigOptionRequest::new(session.clone(), id.to_owned(), value)).block_task().await?;
                 }
             }

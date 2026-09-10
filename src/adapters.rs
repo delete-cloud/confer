@@ -329,9 +329,17 @@ pub(crate) fn validate_seat_config(
     model: Option<&str>,
     effort: Option<&str>,
 ) -> Result<()> {
-    validate_effort(effort)?;
-    if agent == AgentKind::Kimi && effort.is_some() {
-        bail!("Kimi Code does not support reasoning_effort");
+    if agent == AgentKind::Kimi {
+        // Kimi ACP thinking is always-on for current models. Copilot's
+        // `none` is a real Copilot level; Kimi has no off switch, so
+        // `none`/`off` fail here instead of at the first prompt.
+        if let Some(effort) = effort
+            && !["on", "low", "high", "max"].contains(&effort)
+        {
+            bail!("unsupported Kimi thinking '{effort}'");
+        }
+    } else {
+        validate_effort(effort)?;
     }
     if agent == AgentKind::Agy
         && let Some(effort) = effort
@@ -1016,9 +1024,20 @@ mod tests {
     }
 
     #[test]
-    fn kimi_rejects_reasoning_effort() {
-        assert!(super::validate_seat_config(AgentKind::Kimi, None, Some("high")).is_err());
-        assert!(super::validate_seat_config(AgentKind::Kimi, None, None).is_ok());
+    fn kimi_accepts_thinking_values_as_reasoning_effort() {
+        assert!(super::validate_seat_config(AgentKind::Copilot, None, Some("none")).is_ok());
+        for effort in [None, Some("on"), Some("low"), Some("high"), Some("max")] {
+            assert!(
+                super::validate_seat_config(AgentKind::Kimi, None, effort).is_ok(),
+                "{effort:?}"
+            );
+        }
+        for effort in ["none", "off", "medium", "minimal", "xhigh", "ultra", "not-a-level"] {
+            assert!(
+                super::validate_seat_config(AgentKind::Kimi, None, Some(effort)).is_err(),
+                "{effort}"
+            );
+        }
     }
 
     #[test]
