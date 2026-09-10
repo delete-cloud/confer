@@ -23,7 +23,7 @@ fn invocation(directory: &Path, agent: AgentKind, script: &str) -> Invocation {
 
 #[tokio::test]
 async fn cli_bridge_preserves_native_identity_and_prompt() {
-    for agent in [AgentKind::Claude, AgentKind::Agy, AgentKind::Kimi] {
+    for agent in [AgentKind::Claude, AgentKind::Agy] {
         let directory = tempfile::tempdir().unwrap();
         let mut invocation = invocation(
             directory.path(),
@@ -55,49 +55,6 @@ printf '%s\n' '{"session_id":"native-session","result":"Final answer"}'
         assert!(arguments.contains("Private seat instructions\n\nFollow-up task"));
         assert!(!arguments.contains("Current task"));
     }
-}
-
-#[tokio::test]
-async fn kimi_bridge_reads_identity_from_resume_hint_only() {
-    let directory = tempfile::tempdir().unwrap();
-    let invocation = invocation(
-        directory.path(),
-        AgentKind::Kimi,
-        r#"
-printf '%s\n' '{"role":"meta","type":"system.version","version":"0.41.0"}'
-printf '%s\n' '{"role":"assistant","content":"KIMI_OK"}'
-printf '%s\n' '{"role":"meta","type":"session.resume_hint","session_id":"session_kimi-1","command":"kimi -r session_kimi-1"}'
-"#,
-    );
-    let output = run(invocation).await;
-    assert_eq!(output.answer.as_deref(), Some("KIMI_OK"));
-    assert_eq!(
-        output.observed_session_id.as_deref(),
-        Some("session_kimi-1")
-    );
-    assert!(output.error.is_none(), "{output:?}");
-}
-
-#[tokio::test]
-async fn kimi_bridge_rejects_success_without_a_session_id() {
-    let directory = tempfile::tempdir().unwrap();
-    // The assistant answer arrived but the trailing session.resume_hint
-    // never did, so the seat identity would be lost.
-    let invocation = invocation(
-        directory.path(),
-        AgentKind::Kimi,
-        r#"printf '%s\n' '{"role":"assistant","content":"KIMI_OK"}'"#,
-    );
-    let output = run(invocation).await;
-    assert_eq!(output.answer, None);
-    assert_eq!(output.observed_session_id, None);
-    assert!(
-        output
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("did not report a session id")),
-        "{output:?}"
-    );
 }
 
 #[tokio::test]

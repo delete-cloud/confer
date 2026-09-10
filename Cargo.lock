@@ -1080,8 +1080,7 @@ dependencies = [
 [[package]]
 name = "kitup"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46d990ed3fd5d645bfc97a2acc03e221eb9e7611da0eea452b9dfdf98c0856a7"
+source = "git+https://github.com/delete-cloud/kitup.git?rev=716a74480300582b7044e2ae745cc42974cf001f#716a74480300582b7044e2ae745cc42974cf001f"
 dependencies = [
  "serde",
  "serde_json",

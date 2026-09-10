@@ -163,9 +163,8 @@ fn supported_skill_agents(
             // kitup's kimi-cli detection only probes the default data root;
             // a custom KIMI_CODE_HOME is invisible to it. Fall back to
             // confer's own readiness check so auto selection still lists
-            // Kimi Code. This fixes detection only: the install target path
-            // still comes from kitup's host data (see the SPEC note on
-            // Kitup 0.1.4's kimi-cli skill dir).
+            // Kimi Code. Detection is independent of the install target,
+            // which comes from patched kitup host data (`~/.agents/skills`).
             if !detected.iter().any(|id| id == "kimi-cli")
                 && crate::adapters::check_readiness(AgentKind::Kimi).locally_ready
             {

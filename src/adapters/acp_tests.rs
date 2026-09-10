@@ -556,6 +556,95 @@ async fn copilot_applies_model_and_effort_through_config_options() {
 }
 
 #[tokio::test]
+async fn kimi_applies_auto_mode_and_model_through_config_options() {
+    for (first_message, model) in [
+        (true, Some("kimi-code/k3")),
+        (false, Some("kimi-code/kimi-for-coding")),
+        (true, None),
+        (false, None),
+    ] {
+        let mut invocation = invocation(first_message);
+        invocation.agent = AgentKind::Kimi;
+        invocation.model = model.map(str::to_owned);
+        super::validate_invocation(&invocation).unwrap();
+        let expected = std::iter::once((json!("mode"), json!("auto")))
+            .chain(model.map(|model| (json!("model"), json!(model))))
+            .collect::<Vec<_>>();
+        let (client, server) = Channel::duplex();
+        let configured = Arc::new(Mutex::new(Vec::new()));
+        let server = tokio::spawn(async move {
+            Agent
+                .builder()
+                .on_receive_request(
+                    async move |request: UntypedMessage, responder, cx| {
+                        let params = request.params();
+                        match request.method() {
+                            "initialize" => responder.respond(json!({
+                                "protocolVersion":1,
+                                "agentCapabilities":{
+                                    "loadSession":true,
+                                    "sessionCapabilities":{"resume":{},"close":{}}
+                                }
+                            })),
+                            "session/new" => {
+                                assert!(first_message);
+                                responder.respond(json!({
+                                    "sessionId":"native-session",
+                                    "configOptions":[
+                                        {"type":"select","id":"mode","currentValue":"default","options":[]},
+                                        {"type":"select","id":"model","currentValue":"kimi-code/kimi-for-coding","options":[]}
+                                    ]
+                                }))
+                            }
+                            "session/resume" => {
+                                assert!(!first_message);
+                                assert_eq!(params["sessionId"], "native-session");
+                                responder.respond(json!({}))
+                            }
+                            "session/set_config_option" => {
+                                assert_eq!(params["sessionId"], "native-session");
+                                configured
+                                    .lock()
+                                    .unwrap()
+                                    .push((params["configId"].clone(), params["value"].clone()));
+                                responder.respond(json!({"configOptions":[]}))
+                            }
+                            "session/prompt" => {
+                                assert_eq!(*configured.lock().unwrap(), expected);
+                                cx.send_notification(message("configured answer"))?;
+                                responder.respond(json!({"stopReason":"end_turn"}))
+                            }
+                            "session/close" => responder.respond(json!({})),
+                            _ => responder.respond_with_error(Error::method_not_found()),
+                        }
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .connect_to(server)
+                .await
+        });
+        let output = tokio::time::timeout(
+            Duration::from_secs(5),
+            acp::run_connection(client, invocation, true),
+        )
+        .await
+        .expect("Kimi setup and configuration must terminate");
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        assert!(output.error.is_none(), "{output:?}");
+        assert_eq!(output.answer.as_deref(), Some("configured answer"));
+        assert_eq!(
+            output.observed_session_id.as_deref(),
+            Some("native-session")
+        );
+    }
+}
+
+#[tokio::test]
 async fn configuration_failure_before_the_prompt_records_no_native_session() {
     let mut invocation = invocation(true);
     invocation.agent = AgentKind::Copilot;

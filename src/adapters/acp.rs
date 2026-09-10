@@ -164,6 +164,20 @@ pub(super) async fn run_connection(
                     cx.send_request(SetSessionConfigOptionRequest::new(session.clone(), id.to_owned(), value)).block_task().await?;
                 }
             }
+            if invocation.agent == AgentKind::Kimi {
+                // `kimi acp` has no permission flags; even `kimi --auto acp`
+                // leaves session/new at mode=default (manual approvals).
+                // ACP advertises yolo as "Auto-approve everything", but
+                // Kimi 0.41.0 maps auto→engine permission "auto" (Never
+                // Ask) and yolo→"yolo" (Ask When Needed). Unattended seats
+                // need Never Ask. Model uses the same picker; thinking has
+                // no effort levels.
+                let mode = Some(("mode", "auto"));
+                let model = invocation.model.as_deref().map(|model| ("model", model));
+                for (id, value) in mode.into_iter().chain(model) {
+                    cx.send_request(SetSessionConfigOptionRequest::new(session.clone(), id.to_owned(), value)).block_task().await?;
+                }
+            }
             // No native work can happen before the prompt, so a session whose
             // configuration failed is not recorded; agents such as Copilot never
             // persist a session that received no prompt.

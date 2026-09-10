@@ -93,7 +93,9 @@ pub(crate) async fn run(invocation: Invocation) -> AdapterOutput {
         return AdapterOutput::failed(error.to_string());
     }
     match invocation.agent {
-        AgentKind::Grok | AgentKind::Cursor | AgentKind::Copilot => native::run(invocation).await,
+        AgentKind::Grok | AgentKind::Cursor | AgentKind::Copilot | AgentKind::Kimi => {
+            native::run(invocation).await
+        }
         _ => bridge::run(invocation).await,
     }
 }
@@ -272,16 +274,6 @@ async fn run_cli(invocation: Invocation, prompt: &str) -> AdapterOutput {
             error: Some(error_text(&error, &stderr, "")),
         };
     }
-    if invocation.agent == AgentKind::Kimi && observed_session_id.is_none() {
-        // Kimi Code always emits a session.resume_hint with its session id;
-        // a "successful" run without one means we never actually attached to
-        // a session, so report it instead of returning an unresumable answer.
-        return AdapterOutput {
-            observed_session_id: None,
-            answer: None,
-            error: Some(error_text("kimi did not report a session id", &stderr, &raw)),
-        };
-    }
     let answer = answer
         .or_else(|| (!streamed_text.is_empty()).then_some(streamed_text))
         .or_else(|| {
@@ -444,28 +436,7 @@ fn build_command(invocation: &Invocation, prompt: &str) -> Result<Command> {
                 command.args(["--effort", effort]);
             }
         }
-        AgentKind::Kimi => {
-            // `-p` runs one prompt non-interactively under Kimi Code's
-            // default `auto` permission policy, which never blocks on an
-            // approval prompt.
-            //
-            // Pin KIMI_CODE_HOME to the resolved data root so the child
-            // agrees with confer's readiness and MCP registration even
-            // when the variable is unset or relative in our environment.
-            let kimi_home =
-                resolve_kimi_home(std::env::var_os("KIMI_CODE_HOME"), dirs::home_dir())?;
-            command.env("KIMI_CODE_HOME", &kimi_home);
-            command.args(["-p", prompt, "--output-format", "stream-json"]);
-            if let Some(id) = &invocation.native_session_id {
-                command.args(["-S", id]);
-            } else if !invocation.first_message {
-                bail!("Kimi Code resume requires a native session ID");
-            }
-            if let Some(model) = &invocation.model {
-                command.args(["-m", model]);
-            }
-        }
-        AgentKind::Codex | AgentKind::Grok | AgentKind::Cursor | AgentKind::Copilot => {
+        AgentKind::Codex | AgentKind::Grok | AgentKind::Cursor | AgentKind::Copilot | AgentKind::Kimi => {
             bail!("agent requires its ACP transport")
         }
     }
@@ -1023,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_kimi_command_for_first_and_resume_messages() {
+    fn kimi_requires_native_acp_transport() {
         let first = Invocation {
             agent: AgentKind::Kimi,
             executable: PathBuf::from("kimi"),
@@ -1035,44 +1006,13 @@ mod tests {
             message: "Analyze this".into(),
             first_message: true,
         };
-        let command = build_command(&first, &super::prompt_text(&first)).unwrap();
-        let debug = format!("{command:?}");
-        assert!(debug.contains("-p"));
-        assert!(debug.contains("--output-format"));
-        assert!(debug.contains("stream-json"));
-        assert!(debug.contains("-m"));
-        assert!(debug.contains("kimi-code/k3"));
-        // KIMI_CODE_HOME is pinned so the child resolves the same data root.
-        assert!(debug.contains("KIMI_CODE_HOME"));
-
-        let resume = Invocation {
-            agent: AgentKind::Kimi,
-            executable: PathBuf::from("kimi"),
-            workspace: PathBuf::from("/workspace"),
-            native_session_id: Some("session_kimi-1".into()),
-            model: None,
-            reasoning_effort: None,
-            instructions: None,
-            message: "Next step".into(),
-            first_message: false,
-        };
-        let command = build_command(&resume, &super::prompt_text(&resume)).unwrap();
-        let debug = format!("{command:?}");
-        assert!(debug.contains("-S"));
-        assert!(debug.contains("session_kimi-1"));
-
-        let invalid_resume = Invocation {
-            agent: AgentKind::Kimi,
-            executable: PathBuf::from("kimi"),
-            workspace: PathBuf::from("/workspace"),
-            native_session_id: None,
-            model: None,
-            reasoning_effort: None,
-            instructions: None,
-            message: "Next step".into(),
-            first_message: false,
-        };
-        assert!(build_command(&invalid_resume, &super::prompt_text(&invalid_resume)).is_err());
+        let error = build_command(&first, &super::prompt_text(&first))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("ACP transport"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1080,7 +1020,6 @@ mod tests {
         assert!(super::validate_seat_config(AgentKind::Kimi, None, Some("high")).is_err());
         assert!(super::validate_seat_config(AgentKind::Kimi, None, None).is_ok());
     }
-
 
     #[test]
     fn kimi_home_respects_env_override_and_default() {
@@ -1107,23 +1046,6 @@ mod tests {
             super::resolve_kimi_home(Some(OsString::from("relative/kimi")), Some(home.clone()))
                 .unwrap(),
             cwd.join("relative/kimi")
-        );
-    }
-
-    #[test]
-    fn parses_kimi_stream_json_events() {
-        let version = serde_json::json!({"role":"meta","type":"system.version","version":"0.41.0"});
-        let answer = serde_json::json!({"role":"assistant","content":"KIMI_OK"});
-        let resume_hint = serde_json::json!({
-            "role": "meta",
-            "type": "session.resume_hint",
-            "session_id": "session_kimi-1",
-        });
-        assert_eq!(extract_session_id(&version), None);
-        assert_eq!(extract_answer(&answer).as_deref(), Some("KIMI_OK"));
-        assert_eq!(
-            extract_session_id(&resume_hint).as_deref(),
-            Some("session_kimi-1")
         );
     }
 
