@@ -557,9 +557,7 @@ async fn copilot_applies_model_and_effort_through_config_options() {
 
 #[tokio::test]
 async fn kimi_sends_auto_mode_then_model_then_thinking() {
-    // Wire contract only: Confer always sets mode=auto (Never Ask), never
-    // advertised yolo. reasoning_effort maps to thinking as-is.
-    // Kimi 0.41.0 k2.7 thinking is on-only; k3 is low/high/max with on→high.
+    // Wire contract: mode=auto, then model, then thinking.
     for (first_message, model, effort, thinking) in [
         (true, Some("kimi-code/k3"), None, None),
         (true, Some("kimi-code/k3"), Some("low"), Some("low")),
@@ -669,7 +667,7 @@ async fn kimi_sends_auto_mode_then_model_then_thinking() {
 
 #[tokio::test]
 async fn kimi_unknown_thinking_fails_before_the_prompt() {
-    // `high` is locally valid (k3) but k2.7's picker is on-only.
+    // A locally accepted level the session does not offer fails here.
     let mut invocation = invocation(true);
     invocation.agent = AgentKind::Kimi;
     invocation.model = Some("kimi-code/kimi-for-coding".into());

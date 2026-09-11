@@ -330,9 +330,7 @@ pub(crate) fn validate_seat_config(
     effort: Option<&str>,
 ) -> Result<()> {
     if agent == AgentKind::Kimi {
-        // Kimi ACP thinking is always-on for current models. Copilot's
-        // `none` is a real Copilot level; Kimi has no off switch, so
-        // `none`/`off` fail here instead of at the first prompt.
+        // Kimi thinking is `on`/`low`/`high`/`max`; `none`/`off` fail here.
         if let Some(effort) = effort
             && !["on", "low", "high", "max"].contains(&effort)
         {

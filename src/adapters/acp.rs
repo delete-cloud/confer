@@ -165,15 +165,8 @@ pub(super) async fn run_connection(
                 }
             }
             if invocation.agent == AgentKind::Kimi {
-                // `kimi acp` has no permission flags; even `kimi --auto acp`
-                // leaves session/new at mode=default (manual approvals).
-                // ACP advertises yolo as "Auto-approve everything", but
-                // Kimi 0.41.0 maps auto→engine permission "auto" (Never
-                // Ask) and yolo→"yolo" (Ask When Needed). Unattended seats
-                // need Never Ask. Model uses the same picker. Confer's
-                // reasoning_effort maps to thinking (`on`/`low`/`high`/`max`);
-                // `none`/`off` are rejected at seat config. A level the
-                // current picker does not list fails here, before the prompt.
+                // Unattended seats use ACP mode=auto. Model and thinking use
+                // the same config-option channel.
                 let mode = Some(("mode", "auto"));
                 let model = invocation.model.as_deref().map(|model| ("model", model));
                 let thinking = invocation

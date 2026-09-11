@@ -55,8 +55,6 @@ tag-message = "v{{version}}"
 tag-name = "v{{version}}"
 pre-release-hook = ["scripts/regenerate-changelog", "{{version}}"]
 
-# crates.io kitup 0.1.4 still prefers ~/.config/agents/skills for host id
-# kimi-cli; Kimi Code does not scan that directory. lathe-cli/kitup#41
-# landed the host-data fix on main. Remove this patch after the next crates.io release.
+# Remove after the next kitup crates.io release (lathe-cli/kitup#41).
 [patch.crates-io]
 kitup = { git = "https://github.com/lathe-cli/kitup.git", branch = "main" }
