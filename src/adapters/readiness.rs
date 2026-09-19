@@ -60,8 +60,7 @@ fn has_local_auth_marker(agent: AgentKind) -> bool {
         AgentKind::Codex => std::env::var_os("OPENAI_API_KEY").is_some(),
         AgentKind::Cursor => std::env::var_os("CURSOR_API_KEY").is_some(),
         AgentKind::Grok => std::env::var_os("XAI_API_KEY").is_some(),
-        AgentKind::Agy | AgentKind::Kimi => false,
-        AgentKind::Devin => std::env::var_os("WINDSURF_API_KEY").is_some(),
+        AgentKind::Agy | AgentKind::Kimi | AgentKind::Devin => false,
         AgentKind::Copilot => [
             "COPILOT_GITHUB_TOKEN",
             "GH_TOKEN",
@@ -146,19 +145,11 @@ pub(super) fn kimi_home_has_auth(kimi_home: &Path) -> bool {
 }
 
 fn devin_has_credentials(home: &Path) -> bool {
-    let mut roots = vec![home.join(".local").join("share")];
-    if let Some(dir) = std::env::var_os("XDG_DATA_HOME")
+    let data = std::env::var_os("XDG_DATA_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-    {
-        roots.push(dir);
-    }
-    if let Some(dir) = dirs::data_dir() {
-        roots.push(dir);
-    }
-    roots
-        .iter()
-        .any(|dir| dir.join("devin").join("credentials.toml").is_file())
+        .unwrap_or_else(|| home.join(".local").join("share"));
+    data.join("devin").join("credentials.toml").is_file()
 }
 
 fn copilot_home(home: &Path) -> PathBuf {
