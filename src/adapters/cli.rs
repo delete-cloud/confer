@@ -248,7 +248,7 @@ pub(super) fn extract_native_error(value: &Value) -> Option<String> {
         .and_then(extract_text)
 }
 
-fn extract_text(value: &Value) -> Option<String> {
+pub(super) fn extract_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) if !text.is_empty() => Some(text.clone()),
         Value::Array(items) => {
