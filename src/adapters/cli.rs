@@ -140,7 +140,8 @@ pub(super) fn build_command(invocation: &Invocation, prompt: &str) -> Result<Com
         | AgentKind::Grok
         | AgentKind::Cursor
         | AgentKind::Copilot
-        | AgentKind::Kimi => {
+        | AgentKind::Kimi
+        | AgentKind::Devin => {
             bail!("agent requires its ACP transport")
         }
     }

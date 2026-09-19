@@ -61,6 +61,7 @@ fn has_local_auth_marker(agent: AgentKind) -> bool {
         AgentKind::Cursor => std::env::var_os("CURSOR_API_KEY").is_some(),
         AgentKind::Grok => std::env::var_os("XAI_API_KEY").is_some(),
         AgentKind::Agy | AgentKind::Kimi => false,
+        AgentKind::Devin => std::env::var_os("WINDSURF_API_KEY").is_some(),
         AgentKind::Copilot => [
             "COPILOT_GITHUB_TOKEN",
             "GH_TOKEN",
@@ -95,6 +96,7 @@ fn has_local_auth_marker(agent: AgentKind) -> bool {
             return resolve_kimi_home(std::env::var_os("KIMI_CODE_HOME"), Some(home))
                 .is_ok_and(|home| kimi_home_has_auth(&home));
         }
+        AgentKind::Devin => return devin_has_credentials(&home),
     };
     markers.iter().any(|marker| home.join(marker).is_file())
 }
@@ -141,6 +143,22 @@ pub(super) fn kimi_home_has_auth(kimi_home: &Path) -> bool {
         return false;
     };
     config.providers.values().any(KimiProvider::has_credential)
+}
+
+fn devin_has_credentials(home: &Path) -> bool {
+    let mut roots = vec![home.join(".local").join("share")];
+    if let Some(dir) = std::env::var_os("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        roots.push(dir);
+    }
+    if let Some(dir) = dirs::data_dir() {
+        roots.push(dir);
+    }
+    roots
+        .iter()
+        .any(|dir| dir.join("devin").join("credentials.toml").is_file())
 }
 
 fn copilot_home(home: &Path) -> PathBuf {
