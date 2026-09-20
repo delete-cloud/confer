@@ -120,6 +120,92 @@ async fn native_git_uses_the_invocation_workspace() {
 }
 
 #[tokio::test]
+async fn devin_bridge_reads_session_and_answer_from_atif_export() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut invocation = invocation(
+        directory.path(),
+        AgentKind::Devin,
+        r#"
+printf '%s\n' "$@" > arguments
+export_path=""
+resumed=0
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--export" ]; then export_path="$2"; fi
+  case "$1" in --resume=*) resumed=1 ;; esac
+  shift
+done
+if [ "$resumed" = 1 ]; then
+  printf '%s' '{"schema_version":"ATIF-v1.7","session_id":"devin-session","agent":{"name":"devin"},"steps":[{"source":"user","message":"task"},{"source":"agent","message":"Stale prior-turn answer"},{"source":"user","message":"follow-up"},{"source":"agent","tool_calls":[]}]}' > "$export_path"
+else
+  printf '%s' '{"schema_version":"ATIF-v1.7","session_id":"devin-session","agent":{"name":"devin"},"steps":[{"source":"user","message":"task"},{"source":"agent","message":"Working"},{"source":"agent","message":"Final answer"}]}' > "$export_path"
+fi
+printf '%s\n' 'stdout noise'
+"#,
+    );
+    let output = run(invocation.clone()).await;
+    assert_eq!(output.observed_session_id.as_deref(), Some("devin-session"));
+    assert_eq!(output.answer.as_deref(), Some("Final answer"));
+    assert!(output.error.is_none(), "{output:?}");
+    let arguments = std::fs::read_to_string(directory.path().join("arguments")).unwrap();
+    assert!(arguments.contains("Private seat instructions\n\nCurrent task"));
+
+    invocation.first_message = false;
+    invocation.native_session_id = output.observed_session_id;
+    invocation.message = "Follow-up task".into();
+    let output = run(invocation).await;
+    assert!(output.error.is_none(), "{output:?}");
+    assert_eq!(output.observed_session_id.as_deref(), Some("devin-session"));
+    // The resumed export still contains the prior turn; the answer must come
+    // from the current turn's stdout rather than a stale agent step.
+    assert_eq!(output.answer.as_deref(), Some("stdout noise"));
+    let arguments = std::fs::read_to_string(directory.path().join("arguments")).unwrap();
+    assert!(arguments.contains("--resume=devin-session"));
+    assert!(arguments.contains("Private seat instructions\n\nFollow-up task"));
+}
+
+#[tokio::test]
+async fn devin_bridge_falls_back_to_stdout_for_current_turn() {
+    let directory = tempfile::tempdir().unwrap();
+    let invocation = invocation(
+        directory.path(),
+        AgentKind::Devin,
+        r#"
+export_path=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--export" ]; then export_path="$2"; fi
+  shift
+done
+printf '%s' '{"session_id":"devin-session","steps":[{"source":"user","message":"task"},{"source":"agent","tool_calls":[]}]}' > "$export_path"
+printf '%s\n' 'Printed answer'
+"#,
+    );
+    let output = run(invocation).await;
+    assert_eq!(output.answer.as_deref(), Some("Printed answer"));
+    assert_eq!(output.observed_session_id.as_deref(), Some("devin-session"));
+    assert!(output.error.is_none(), "{output:?}");
+}
+
+#[tokio::test]
+async fn devin_bridge_fails_without_a_session_in_the_export() {
+    let directory = tempfile::tempdir().unwrap();
+    let invocation = invocation(
+        directory.path(),
+        AgentKind::Devin,
+        "printf '%s\\n' 'Printed answer'\n",
+    );
+    let output = run(invocation).await;
+    assert!(output.answer.is_none());
+    assert!(output.observed_session_id.is_none());
+    assert!(
+        output
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("session id")),
+        "{output:?}"
+    );
+}
+
+#[tokio::test]
 async fn cli_bridge_does_not_turn_a_failed_result_into_success() {
     let directory = tempfile::tempdir().unwrap();
     let invocation = invocation(

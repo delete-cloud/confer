@@ -195,6 +195,19 @@ fn kimi_accepts_thinking_values_as_reasoning_effort() {
 }
 
 #[test]
+fn devin_rejects_reasoning_effort() {
+    assert!(super::validate_seat_config(AgentKind::Devin, Some("opus"), None).is_ok());
+    assert!(super::validate_seat_config(AgentKind::Devin, None, Some("high")).is_err());
+    assert!(super::validate_seat_config(AgentKind::Devin, None, Some("ultra")).is_err());
+    assert!(
+        build_command(&invocation(AgentKind::Devin), "prompt")
+            .unwrap_err()
+            .to_string()
+            .contains("ACP transport")
+    );
+}
+
+#[test]
 fn kimi_home_respects_env_override_and_default() {
     use std::ffi::OsString;
     let home = PathBuf::from("/home/test");

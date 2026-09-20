@@ -7,6 +7,7 @@ mod cli;
 mod cli_tests;
 mod codex;
 mod config;
+mod devin;
 mod native;
 mod process;
 mod readiness;
@@ -61,7 +62,8 @@ pub(crate) fn reserve_session(agent: AgentKind) -> Option<String> {
         | AgentKind::Cursor
         | AgentKind::Agy
         | AgentKind::Copilot
-        | AgentKind::Kimi => None,
+        | AgentKind::Kimi
+        | AgentKind::Devin => None,
     }
 }
 
