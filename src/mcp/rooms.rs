@@ -179,6 +179,18 @@ fn select_seats(
                 AgentKind::parse(value).with_context(|| format!("unsupported agent '{value}'"))
             })
             .transpose()?;
+        let model = trimmed(spec.model);
+        let reasoning_effort = trimmed(spec.reasoning_effort);
+        if requested_agent.is_none() && (model.is_some() || reasoning_effort.is_some()) {
+            bail!(
+                "seat '{}' sets model or reasoning_effort without an agent",
+                spec.name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("unnamed")
+            );
+        }
         let selected = match requested_agent {
             Some(agent) if preferred.contains(&agent) => agent,
             Some(agent) => {
@@ -217,8 +229,6 @@ fn select_seats(
             }
         }
         names.insert(name.clone());
-        let model = spec.model;
-        let reasoning_effort = spec.reasoning_effort;
         adapters::validate_seat_config(selected, model.as_deref(), reasoning_effort.as_deref())?;
         seats.push(SeatRecord {
             id: uuid::Uuid::new_v4().to_string(),
@@ -232,6 +242,12 @@ fn select_seats(
         });
     }
     Ok(seats)
+}
+
+fn trimmed(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn detect_host_agent(explicit: Option<&str>) -> Option<String> {

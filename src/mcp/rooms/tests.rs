@@ -118,6 +118,59 @@ fn identical_configurations_create_separate_seats() {
 }
 
 #[test]
+fn model_or_effort_without_agent_is_rejected() {
+    for (model, effort) in [
+        (Some("claude-opus-5-5"), None),
+        (None, Some("high")),
+        (Some("gpt-6-sol"), Some("medium")),
+    ] {
+        let request = SeatSpecInput {
+            agent: None,
+            model: model.map(str::to_owned),
+            reasoning_effort: effort.map(str::to_owned),
+            name: Some("opus".into()),
+            instructions: None,
+        };
+        let error = select_seats(
+            vec![request],
+            1,
+            Some("cursor"),
+            &[ready(AgentKind::Claude), ready(AgentKind::Codex)],
+            HashSet::new(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("sets model or reasoning_effort without an agent"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn blank_model_and_effort_are_unset() {
+    let request = SeatSpecInput {
+        agent: None,
+        model: Some("  ".into()),
+        reasoning_effort: Some("".into()),
+        name: None,
+        instructions: None,
+    };
+    let seats = select_seats(
+        vec![request],
+        1,
+        None,
+        &[ready(AgentKind::Codex)],
+        HashSet::new(),
+    )
+    .unwrap();
+    assert_eq!(seats[0].agent, AgentKind::Codex);
+    assert!(seats[0].model.is_none());
+    assert!(seats[0].reasoning_effort.is_none());
+}
+
+#[test]
 fn seat_selection_validates_the_final_agent_configuration() {
     for (agent, model, effort) in [
         (AgentKind::Cursor, Some("model[effort=high]"), Some("high")),

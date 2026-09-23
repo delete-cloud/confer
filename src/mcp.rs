@@ -1,3 +1,4 @@
+pub(crate) mod activity;
 mod api;
 mod delivery;
 mod rooms;
@@ -53,7 +54,12 @@ pub(crate) fn run_capabilities(format: CapabilitiesFormat) -> Result<()> {
 }
 
 async fn serve() -> Result<()> {
-    let service = ConferMcp::new()?.serve(stdio()).await?;
+    let mut server = ConferMcp::new()?;
+    match activity::Instance::register(&server.store.runtime_path()) {
+        Ok(instance) => server.runtime.activity = Some(instance),
+        Err(error) => eprintln!("Confer running state unavailable: {error:#}"),
+    }
+    let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
 }
@@ -73,7 +79,7 @@ impl ConferMcp {
     }
 
     #[tool(
-        description = "Create a multi-agent task room. Pass workspace as the actual current task's absolute directory. The returned workspace is normalized to its Git worktree root, or the canonical directory outside Git. Verify that root belongs to your task and use it for followup calls; never substitute another room's workspace to bypass a mismatch. target_size counts execution seats and excludes the host. Provide a positive target_size or at least one seat; there is no default count or fixed seat limit. Explicit seats are preserved and any remaining target positions are selected automatically, preferring agent types other than the host. This checks local readiness and seat configuration and creates logical seats; it never calls a model. An explicitly requested unavailable agent fails the operation without changing room state; the caller decides whether to retry with another agent.",
+        description = "Create a multi-agent task room. Pass workspace as the actual current task's absolute directory. The returned workspace is normalized to its Git worktree root, or the canonical directory outside Git. Verify that root belongs to your task and use it for followup calls; never substitute another room's workspace to bypass a mismatch. target_size counts execution seats and excludes the host. Provide a positive target_size or at least one seat; there is no default count or fixed seat limit. Explicit seats are preserved and any remaining target positions are selected automatically, preferring agent types other than the host. This checks local readiness and seat configuration and creates logical seats; it never calls a model. A seat that sets model or reasoning_effort must also set agent; Confer never infers the agent from a model name. An explicitly requested unavailable agent fails the operation without changing room state; the caller decides whether to retry with another agent.",
         annotations(
             title = "Create room",
             read_only_hint = false,
@@ -89,7 +95,7 @@ impl ConferMcp {
     }
 
     #[tool(
-        description = "Add one private seat to a room. Pass the normalized workspace root already verified against your actual current task when creating or recovering the room. A different workspace is rejected; never substitute another room's workspace to bypass a mismatch. The seat starts a new native session on its first message. An explicitly requested unavailable agent fails the operation without changing room state; the caller decides whether to retry with another agent.",
+        description = "Add one private seat to a room. Pass the normalized workspace root already verified against your actual current task when creating or recovering the room. A different workspace is rejected; never substitute another room's workspace to bypass a mismatch. The seat starts a new native session on its first message. A seat that sets model or reasoning_effort must also set agent; Confer never infers the agent from a model name. An explicitly requested unavailable agent fails the operation without changing room state; the caller decides whether to retry with another agent.",
         annotations(
             title = "Add seat",
             read_only_hint = false,

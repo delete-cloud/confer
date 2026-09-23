@@ -13,7 +13,19 @@ Confer MCP owns room metadata, native session routing, and message delivery. Nev
 
 ## Create the Room
 
-Honor explicit choices for agent, model, reasoning effort, participant count, role, and independence. When choices are open, select seats from the task:
+Honor explicit choices for agent, model, reasoning effort, participant count, role, and independence. A model family name is an explicit model choice. Resolve it to `agent` and `model` before `create_room` or `add_seat`. Never put a model name in `agent`.
+
+A bare family name means the latest model in that family. A version pins that model.
+
+- Claude families `opus`, `sonnet`, `haiku`, and `fable` use `agent: "claude"`. Without a version, pass the family word as `model`; the Claude CLI resolves it to the latest model in that family. With a version, pass the native id `claude-<family>-<major>-<minor>`: `opus 5.5` and `opus-5.5` are `claude-opus-5-5`, not `opus-5.5`.
+- Codex names use `agent: "codex"` and a local Codex slug as `model`. Local slugs are the `slug` values in `~/.codex/models_cache.json`. Normalize case and turn spaces into hyphens: `GPT 5.5` and `gpt 6 sol` become `gpt-5.5` and `gpt-6-sol`. A bare `sol` means the latest model in the sol series. Codex has no `sol` alias, so do not pass `model: "sol"`. Use the newest local slug that ends in `-sol`. When the local slugs are `gpt-6-sol` and `gpt-5.6-sol`, that is `gpt-6-sol`. A name that matches no local slug, such as `gpt-6` when only `gpt-6-sol` and `gpt-6-luna` exist, is ambiguous. Ask which model the user means.
+- An agent name such as "let Claude look" sets `agent` and leaves `model` unset.
+- If the named agent and model belong to different products, do not create the seat. Say they conflict.
+- If the native CLI rejects the model, report that error. Retire the seat and add a new one with the corrected id. The stored model cannot be changed in place.
+
+Do not guess a version the user did not say, and do not substitute a different family.
+
+When choices are open, select seats from the task:
 
 - planning and architecture need a strong reasoning model and instructions that forbid edits;
 - implementation needs the agent best suited to the codebase and explicit authority boundaries;
