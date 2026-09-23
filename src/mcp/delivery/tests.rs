@@ -21,6 +21,7 @@ fn delivery(id: &str, status: DeliveryStatus) -> DeliveryState {
         status,
         final_answer: None,
         error: None,
+        resume_command: None,
     }
 }
 

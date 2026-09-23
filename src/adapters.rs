@@ -65,6 +65,36 @@ pub(crate) fn reserve_session(agent: AgentKind) -> Option<String> {
     }
 }
 
+pub(crate) fn resume_command(
+    agent: AgentKind,
+    workspace: &str,
+    session_id: &str,
+) -> Option<String> {
+    let session = shell_quote(session_id);
+    let resume = match agent {
+        AgentKind::Claude => format!("claude --resume {session}"),
+        AgentKind::Codex => format!("codex resume {session}"),
+        AgentKind::Grok => format!("grok --resume {session}"),
+        AgentKind::Agy => format!("agy --conversation {session}"),
+        AgentKind::Copilot => format!("copilot --resume={session}"),
+        AgentKind::Kimi => format!("kimi --session {session}"),
+        AgentKind::Cursor => return None,
+    };
+    Some(format!("cd {} && {resume}", shell_quote(workspace)))
+}
+
+fn shell_quote(value: &str) -> String {
+    let plain = !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-+@%:,=".contains(c));
+    if plain {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 pub(crate) async fn run(invocation: Invocation) -> AdapterOutput {
     if let Err(error) = validate_invocation(&invocation) {
         return AdapterOutput::failed(error.to_string());

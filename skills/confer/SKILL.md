@@ -76,6 +76,8 @@ Return a single conclusion, not a transcript dump. Preserve important disagreeme
 
 Report unavailable or replaced participants, failed deliveries, and timeouts. Do not credit an incomplete delivery.
 
+For every seat that did work in this reply, end with its `resume_command` from wait_output so the user can take over that session in its own CLI. When a seat has no command, say its session cannot be resumed from the CLI. Do not give a command for a seat that still has queued or running deliveries.
+
 Confer returns final answers only. Verify code, tests, commands, and repository state directly before presenting an agent claim as fact.
 
 ## Preserve User Authority

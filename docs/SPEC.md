@@ -130,7 +130,7 @@ Retires one seat by name or ID using `room_id`, `seat`, and the host-verified wo
 
 Lists rooms. `scope` defaults to `current`, which requires the host task's absolute directory in `workspace` and normalizes it like creation. `all` returns metadata for every recorded workspace without requiring a workspace or inspecting the MCP process working directory. The bundled Skill uses this when the user explicitly asks to recover an earlier room; other callers decide their own discovery workflow. Discovery does not authorize operating on rooms outside the host task's workspace.
 
-Output includes room ID, name, participants, native-session availability, and timestamps. It never returns message content.
+Output includes room ID, name, participants, native-session availability, each seat's resume command, and timestamps. It never returns message content.
 
 ### `send_message`
 
@@ -149,7 +149,7 @@ The send returns one receipt and new `delivery_id` per recipient plus immediate 
 
 Waits for specified deliveries or the room’s current live deliveries. Requires `room_id` and the host-verified workspace root in `workspace`. `timeout_ms` defaults to `120000`, accepts `0` for an immediate snapshot, and is capped at `600000`.
 
-Output contains each delivery’s `queued`, `running`, `completed`, or `failed` status, final assistant answer, and error. It does not expose thinking, token deltas, or intermediate tool events. A timeout returns completed results and current non-terminal statuses without cancelling them.
+Output contains each delivery’s `queued`, `running`, `completed`, or `failed` status, final assistant answer, and error. A finished delivery whose seat has a native session includes `resume_command`: a shell command that enters the workspace and opens that session in the agent's own interactive CLI, so the user can continue the work directly. Cursor ACP sessions are stored separately from Cursor CLI chats and return no command. Resuming while the seat still has queued or running deliveries lets two processes write the same native session. It does not expose thinking, token deltas, or intermediate tool events. A timeout returns completed results and current non-terminal statuses without cancelling them.
 
 ## CLI surface
 
