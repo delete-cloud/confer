@@ -215,6 +215,35 @@ printf '%s' '{"steps":[{"source":"user","message":"follow-up"},{"source":"agent"
 }
 
 #[tokio::test]
+async fn devin_bridge_fails_a_resumed_export_with_a_different_session() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut invocation = invocation(
+        directory.path(),
+        AgentKind::Devin,
+        r#"
+export_path=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--export" ]; then export_path="$2"; fi
+  shift
+done
+printf '%s' '{"session_id":"other-session","steps":[{"source":"user","message":"follow-up"},{"source":"agent","message":"Resumed answer"}]}' > "$export_path"
+"#,
+    );
+    invocation.first_message = false;
+    invocation.native_session_id = Some("devin-session".into());
+    let output = run(invocation).await;
+    assert_eq!(output.observed_session_id.as_deref(), Some("devin-session"));
+    assert!(output.answer.is_none());
+    assert!(
+        output
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("devin-session") && error.contains("other-session")),
+        "{output:?}"
+    );
+}
+
+#[tokio::test]
 async fn devin_bridge_preserves_the_session_after_a_failed_exit() {
     let directory = tempfile::tempdir().unwrap();
     let invocation = invocation(

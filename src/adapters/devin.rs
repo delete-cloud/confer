@@ -43,16 +43,31 @@ pub(super) async fn run(invocation: Invocation, prompt: &str) -> AdapterOutput {
     let stdout = raw_lines.join("\n");
     let stdout = stdout.trim();
     let (exported_session, exported_answer) = exported.unwrap_or_default();
+    // A resumed turn whose export reports a different session id means devin
+    // forked or lost the seat's session; fail the delivery instead of letting
+    // the foreign id surface and strand the seat.
+    let session_mismatch = match (&invocation.native_session_id, &exported_session) {
+        (Some(expected), Some(observed)) if expected != observed => Some(format!(
+            "devin resumed session '{expected}' but its export reported '{observed}'"
+        )),
+        _ => None,
+    };
     // A resumed turn whose export omits the session id keeps the seat's
     // existing native session instead of failing the delivery.
-    let session = exported_session.or_else(|| invocation.native_session_id.clone());
+    let session = match session_mismatch {
+        Some(_) => invocation.native_session_id.clone(),
+        None => exported_session.or_else(|| invocation.native_session_id.clone()),
+    };
     let result = match status {
         Err(error) => Err(format!(
             "failed to wait for {}: {error}",
             invocation.agent.id()
         )),
         Ok(None) => Err(error_text(
-            &format!("{} ignored stdout EOF", invocation.agent.id()),
+            &format!(
+                "{} did not exit within 3s of stdout EOF; terminated",
+                invocation.agent.id()
+            ),
             &stderr,
             stdout,
         )),
@@ -66,22 +81,21 @@ pub(super) async fn run(invocation: Invocation, prompt: &str) -> AdapterOutput {
             &stderr,
             stdout,
         )),
-        _ => exported_answer
-            .or_else(|| (!stdout.is_empty()).then(|| stdout.to_owned()))
-            .ok_or_else(|| error_text("agent returned no final answer", &stderr, "")),
+        _ => match session_mismatch {
+            Some(mismatch) => Err(error_text(&mismatch, &stderr, stdout)),
+            None => exported_answer
+                .or_else(|| (!stdout.is_empty()).then(|| stdout.to_owned()))
+                .ok_or_else(|| error_text("agent returned no final answer", &stderr, "")),
+        },
     };
     AdapterOutput::from_result(session, result)
 }
 
 fn private_export_dir() -> Result<tempfile::TempDir> {
-    let mut builder = tempfile::Builder::new();
-    builder.prefix("confer-devin-");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        builder.permissions(std::fs::Permissions::from_mode(0o700));
-    }
-    builder
+    // tempfile creates directories 0700 on unix; the transcript carries
+    // private seat instructions.
+    tempfile::Builder::new()
+        .prefix("confer-devin-")
         .tempdir()
         .context("failed to create a private devin export directory")
 }
