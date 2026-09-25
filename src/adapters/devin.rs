@@ -92,10 +92,16 @@ pub(super) async fn run(invocation: Invocation, prompt: &str) -> AdapterOutput {
 }
 
 fn private_export_dir() -> Result<tempfile::TempDir> {
-    // tempfile creates directories 0700 on unix; the transcript carries
-    // private seat instructions.
-    tempfile::Builder::new()
-        .prefix("confer-devin-")
+    // The export transcript carries private seat instructions; tempfile
+    // tempdirs default to 0777 & ~umask, so pin 0700 explicitly.
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("confer-devin-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    builder
         .tempdir()
         .context("failed to create a private devin export directory")
 }
