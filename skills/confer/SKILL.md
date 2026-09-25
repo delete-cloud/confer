@@ -33,7 +33,7 @@ When choices are open, select seats from the task:
 
 Choose the number of execution seats from the task; there is no default count. Supply a positive `target_size`, explicit `seats`, or both. `target_size` excludes the host. Confer preserves explicit seats and automatically fills remaining positions, preferring agent types other than the host. The same agent, model, and reasoning effort may be used by multiple independent seats. Give seats short unique names and private instructions. Treat one room as one coordination context: add a new seat when a later phase needs another role, and retire a seat only after its delivery finishes and its role is complete.
 
-When the host is Kimi Code, pass `"host_agent": "kimi"` on create_room: confer's automatic host detection recognizes Claude, Codex, Cursor, Grok, and Copilot session markers, while Kimi Code, Antigravity, and Devin expose no equivalent marker, so auto-detection would mislabel those hosts. Pass it explicitly whenever auto-detection may not identify the host, not only for Kimi.
+When the host is Kimi Code, pass `"host_agent": "kimi"` on create_room; for Devin for Terminal pass `"host_agent": "devin"`: confer's automatic host detection recognizes Claude, Codex, Cursor, Grok, and Copilot session markers, while Kimi Code, Antigravity, and Devin expose no equivalent marker, so auto-detection would mislabel those hosts. Pass it explicitly whenever auto-detection may not identify the host, not only for Kimi.
 
 Kimi Code seats' `reasoning_effort` is thinking (`on` / `low` / `high` / `max`). Devin seats do not accept `reasoning_effort`.
 

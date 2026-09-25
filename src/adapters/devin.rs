@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -12,20 +12,18 @@ pub(super) async fn run(invocation: Invocation, prompt: &str) -> AdapterOutput {
         Ok(dir) => dir,
         Err(error) => return AdapterOutput::failed(error.to_string()),
     };
-    let export = export_dir.join("atif-export.json");
-    let mut command = match build_command(&invocation, prompt, &export) {
+    let export = export_dir.path().join("atif-export.json");
+    let prompt_file = export_dir.path().join("prompt.txt");
+    if let Err(error) = std::fs::write(&prompt_file, prompt) {
+        return AdapterOutput::failed(format!("failed to write the devin prompt file: {error}"));
+    }
+    let mut command = match build_command(&invocation, &prompt_file, &export) {
         Ok(command) => command,
-        Err(error) => {
-            let _ = std::fs::remove_dir_all(&export_dir);
-            return AdapterOutput::failed(error.to_string());
-        }
+        Err(error) => return AdapterOutput::failed(error.to_string()),
     };
     let (mut child, stderr) = match super::process::spawn(&mut command, &invocation, false) {
         Ok(process) => process,
-        Err(error) => {
-            let _ = std::fs::remove_dir_all(&export_dir);
-            return AdapterOutput::failed(error.to_string());
-        }
+        Err(error) => return AdapterOutput::failed(error.to_string()),
     };
     let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
     let mut raw_lines = Vec::new();
@@ -39,19 +37,26 @@ pub(super) async fn run(invocation: Invocation, prompt: &str) -> AdapterOutput {
             }
         }
     }
-    let status = child.wait().await;
+    let status = super::reap(&mut child).await;
     let stderr = String::from_utf8_lossy(&stderr.finish().await).into_owned();
     let exported = read_export(&export);
-    let _ = std::fs::remove_dir_all(&export_dir);
     let stdout = raw_lines.join("\n");
     let stdout = stdout.trim();
-    let (session, exported_answer) = exported.unwrap_or_default();
+    let (exported_session, exported_answer) = exported.unwrap_or_default();
+    // A resumed turn whose export omits the session id keeps the seat's
+    // existing native session instead of failing the delivery.
+    let session = exported_session.or_else(|| invocation.native_session_id.clone());
     let result = match status {
         Err(error) => Err(format!(
             "failed to wait for {}: {error}",
             invocation.agent.id()
         )),
-        Ok(status) if !status.success() => Err(error_text(
+        Ok(None) => Err(error_text(
+            &format!("{} ignored stdout EOF", invocation.agent.id()),
+            &stderr,
+            stdout,
+        )),
+        Ok(Some(status)) if !status.success() => Err(error_text(
             &format!("{} exited with {status}", invocation.agent.id()),
             &stderr,
             stdout,
@@ -68,27 +73,32 @@ pub(super) async fn run(invocation: Invocation, prompt: &str) -> AdapterOutput {
     AdapterOutput::from_result(session, result)
 }
 
-fn private_export_dir() -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("confer-devin-{}", uuid::Uuid::new_v4()));
-    let mut builder = std::fs::DirBuilder::new();
+fn private_export_dir() -> Result<tempfile::TempDir> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("confer-devin-");
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
     }
     builder
-        .create(&dir)
-        .with_context(|| format!("failed to create {}", dir.display()))?;
-    Ok(dir)
+        .tempdir()
+        .context("failed to create a private devin export directory")
 }
 
 pub(super) fn build_command(
     invocation: &Invocation,
-    prompt: &str,
+    prompt_file: &Path,
     export: &Path,
 ) -> Result<Command> {
     validate_invocation(invocation)?;
     let mut command = invocation.command();
+    // Seat model and permission mode come from the invocation only, never
+    // inherited devin config env vars.
+    command
+        .env_remove("DEVIN_MODEL")
+        .env_remove("DEVIN_PERMISSION_MODE")
+        .env_remove("DEVIN_SANDBOX");
     command.args([
         "--permission-mode",
         "dangerous",
@@ -105,13 +115,20 @@ pub(super) fn build_command(
     if let Some(model) = &invocation.model {
         command.args(["--model", model]);
     }
-    command.arg("-p").arg("--").arg(prompt);
+    command.arg("-p").arg("--prompt-file").arg(prompt_file);
     Ok(command)
 }
 
 fn read_export(path: &Path) -> Option<(Option<String>, Option<String>)> {
     let value: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-    let session = cli::extract_session_id(&value).filter(|id| !id.is_empty());
+    // Only the root session_id is authoritative; nested objects may carry ids
+    // for subagent trajectories or unrelated sessions.
+    let session = value
+        .get("session_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned);
     let answer = value
         .get("steps")
         .and_then(Value::as_array)
@@ -153,42 +170,73 @@ mod tests {
         }
     }
 
+    fn args(command: &Command) -> Vec<String> {
+        command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
     #[test]
     fn builds_print_command_with_export_and_resume() {
         let export = Path::new("/tmp/export.json");
-        let command = build_command(&invocation(), "prompt", export).unwrap();
-        let debug = format!("{command:?}");
-        for expected in [
-            "-p",
-            "--permission-mode",
-            "dangerous",
-            "--respect-workspace-trust",
-            "false",
-            "--export",
-            "/tmp/export.json",
-            "--",
-        ] {
-            assert!(debug.contains(expected), "{expected}: {debug}");
-        }
-        assert!(!debug.contains("--resume"), "{debug}");
+        let prompt_file = Path::new("/tmp/prompt.txt");
+        let command = build_command(&invocation(), prompt_file, export).unwrap();
+        assert_eq!(
+            args(&command),
+            [
+                "--permission-mode",
+                "dangerous",
+                "--respect-workspace-trust",
+                "false",
+                "--export",
+                "/tmp/export.json",
+                "-p",
+                "--prompt-file",
+                "/tmp/prompt.txt",
+            ]
+        );
 
         let mut resume = invocation();
         resume.native_session_id = Some("devin-123".into());
         resume.first_message = false;
         resume.model = Some("opus".into());
-        let command = build_command(&resume, "prompt", export).unwrap();
-        let debug = format!("{command:?}");
-        assert!(debug.contains("--resume=devin-123"), "{debug}");
-        assert!(debug.contains("--model"), "{debug}");
-        assert!(debug.contains("opus"), "{debug}");
+        let command = build_command(&resume, prompt_file, export).unwrap();
+        assert_eq!(
+            args(&command),
+            [
+                "--permission-mode",
+                "dangerous",
+                "--respect-workspace-trust",
+                "false",
+                "--export",
+                "/tmp/export.json",
+                "--resume=devin-123",
+                "--model",
+                "opus",
+                "-p",
+                "--prompt-file",
+                "/tmp/prompt.txt",
+            ]
+        );
+
+        let envs: Vec<_> = command.as_std().get_envs().collect();
+        for name in ["DEVIN_MODEL", "DEVIN_PERMISSION_MODE", "DEVIN_SANDBOX"] {
+            assert!(
+                envs.iter()
+                    .any(|(key, value)| **key == *name && value.is_none()),
+                "{name} was not cleared: {envs:?}"
+            );
+        }
 
         let mut missing = invocation();
         missing.first_message = false;
-        assert!(build_command(&missing, "prompt", export).is_err());
+        assert!(build_command(&missing, prompt_file, export).is_err());
 
         let mut effort = invocation();
         effort.reasoning_effort = Some("high".into());
-        assert!(build_command(&effort, "prompt", export).is_err());
+        assert!(build_command(&effort, prompt_file, export).is_err());
     }
 
     #[test]
@@ -236,6 +284,20 @@ mod tests {
         .unwrap();
         let (session, answer) = read_export(&export).unwrap();
         assert_eq!(session.as_deref(), Some("devin-session-9"));
+        assert_eq!(answer, None);
+
+        // Nested session ids never override the root one.
+        std::fs::write(
+            &export,
+            serde_json::json!({
+                "steps": [],
+                "nested": {"session_id": "subagent-session"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let (session, answer) = read_export(&export).unwrap();
+        assert_eq!(session, None);
         assert_eq!(answer, None);
 
         std::fs::write(&export, "not json").unwrap();

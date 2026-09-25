@@ -142,7 +142,7 @@ pub(super) fn build_command(invocation: &Invocation, prompt: &str) -> Result<Com
         | AgentKind::Copilot
         | AgentKind::Kimi
         | AgentKind::Devin => {
-            bail!("agent requires its ACP transport")
+            bail!("agent uses a dedicated adapter")
         }
     }
     Ok(command)

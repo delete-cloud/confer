@@ -166,7 +166,7 @@ fn kimi_requires_native_acp_transport() {
     let error = build_command(&first, &super::prompt_text(&first))
         .unwrap_err()
         .to_string();
-    assert!(error.contains("ACP transport"), "{error}");
+    assert!(error.contains("dedicated adapter"), "{error}");
 }
 
 #[test]
@@ -203,7 +203,7 @@ fn devin_rejects_reasoning_effort() {
         build_command(&invocation(AgentKind::Devin), "prompt")
             .unwrap_err()
             .to_string()
-            .contains("ACP transport")
+            .contains("dedicated adapter")
     );
 }
 
