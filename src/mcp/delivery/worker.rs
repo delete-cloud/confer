@@ -86,12 +86,17 @@ async fn process_queued_delivery(
         persist_native_session(store, &queued.room_id, &queued.seat_id, observed_session)
             .err()
             .map(|error| format!("native session could not be persisted: {error}"));
+    let resume_command = observed_session
+        .filter(|_| persistence_error.is_none())
+        .or(seat.native_session_id.as_deref())
+        .and_then(|session| adapters::resume_command(seat.agent, &room.workspace, session));
     deliveries.finish(
         &queued.delivery_id,
         mismatch,
         persistence_error,
         output.error,
         output.answer,
+        resume_command,
     );
     Ok(())
 }

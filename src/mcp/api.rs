@@ -7,6 +7,7 @@ use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::adapters;
 use crate::types::{AgentKind, Readiness, RoomRecord, SeatStatus};
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -94,6 +95,7 @@ pub(super) struct SeatView {
     model: Option<String>,
     reasoning_effort: Option<String>,
     native_session: bool,
+    resume_command: Option<String>,
     status: SeatStatus,
 }
 
@@ -149,6 +151,9 @@ pub(super) fn room_view(room: &RoomRecord) -> RoomView {
                 model: seat.model.clone(),
                 reasoning_effort: seat.reasoning_effort.clone(),
                 native_session: seat.native_session_id.is_some(),
+                resume_command: seat.native_session_id.as_deref().and_then(|session| {
+                    adapters::resume_command(seat.agent, &room.workspace, session)
+                }),
                 status: seat.status,
             })
             .collect(),

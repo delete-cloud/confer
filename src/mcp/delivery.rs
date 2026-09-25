@@ -40,6 +40,7 @@ struct DeliveryState {
     status: DeliveryStatus,
     final_answer: Option<String>,
     error: Option<String>,
+    resume_command: Option<String>,
 }
 
 impl DeliveryState {
@@ -156,8 +157,10 @@ impl DeliveryTracker {
         persistence_error: Option<String>,
         output_error: Option<String>,
         answer: Option<String>,
+        resume_command: Option<String>,
     ) {
         self.update(delivery_id, |delivery| {
+            delivery.resume_command = resume_command;
             finish_delivery(delivery, mismatch, persistence_error, output_error, answer);
         });
     }
@@ -275,6 +278,7 @@ impl ConferMcp {
             },
             final_answer: None,
             error: error.clone(),
+            resume_command: None,
         });
         if error.is_none() {
             let queued = QueuedDelivery {
