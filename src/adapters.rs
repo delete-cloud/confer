@@ -80,6 +80,7 @@ pub(crate) fn resume_command(
         AgentKind::Agy => format!("agy --conversation {session}"),
         AgentKind::Copilot => format!("copilot --resume={session}"),
         AgentKind::Kimi => format!("kimi --session {session}"),
+        AgentKind::Devin => format!("devin --resume {session}"),
         AgentKind::Cursor => return None,
     };
     Some(format!("cd {} && {resume}", shell_quote(workspace)))
